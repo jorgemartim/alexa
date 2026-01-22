@@ -1,19 +1,19 @@
 blueprint:
-  name: "Anunciar via Alexa Devices"
-  description: "Anuncia via entidade notify (announce ou speak), ajusta volume antes e retorna para 3 depois."
+  name: "Anunciar via Alexa (Smart)"
+  description: "Anuncia via entidade notify, ajusta volume dinamicamente e retorna ao volume padrão após a mensagem."
   domain: script
-mode: queued
-icon: mdi:bullhorn
 
 fields:
   mensagem:
     name: "Mensagem"
+    description: "O texto que a Alexa irá falar."
     required: true
     selector:
       text:
 
   onde_anunciar:
-    name: "Onde anunciar?"
+    name: "Dispositivo (Notify)"
+    description: "Selecione a entidade notify da Alexa."
     required: true
     selector:
       entity:
@@ -22,39 +22,77 @@ fields:
           - domain: notify
             integration: alexa_devices
 
-  volume:
-    name: "Volume:"
+  tipo_anuncio:
+    name: "Tipo de Anúncio"
+    description: "Announce faz o som 'bing-bong'. TTS apenas fala."
+    required: true
+    default: "announce"
+    selector:
+      select:
+        options:
+          - label: "Anúncio (Bing-Bong)"
+            value: "announce"
+          - label: "Apenas Fala (TTS)"
+            value: "tts"
+
+  volume_anuncio:
+    name: "Volume do Anúncio"
+    description: "Volume alto para o aviso."
     required: true
     default: 7
     selector:
       number:
-        min: 0
+        min: 1
         max: 10
         step: 1
+        mode: slider
+
+  volume_retorno:
+    name: "Volume de Retorno"
+    description: "Volume para o qual a Alexa voltará após falar."
+    required: true
+    default: 3
+    selector:
+      number:
+        min: 1
+        max: 10
+        step: 1
+        mode: slider
 
 sequence:
   - variables:
       selected_entity: "{{ onde_anunciar }}"
+      # Tenta extrair o device_id da entidade
       alexa_device_id: "{{ device_id(selected_entity) }}"
+      # Cálculo aproximado: 0.09s por caractere + 2s de margem de segurança
+      tempo_espera: "{{ (mensagem | length * 0.09 + 3) | int }}"
+      modo: "{{ tipo_anuncio }}"
 
+  # 1. Ajustar volume para o anúncio
   - action: alexa_devices.send_text_command
     data:
       device_id: "{{ alexa_device_id }}"
-      text_command: "volume {{ volume | int }}"
+      text_command: "volume {{ volume_anuncio | int }}"
 
+  # Pequeno delay para garantir que o volume mudou antes de falar
   - delay:
-      seconds: 2
+      seconds: 1
 
+  # 2. Enviar a mensagem
   - action: notify.send_message
-    data:
-      message: "{{ mensagem }}"
     target:
       entity_id: "{{ selected_entity }}"
+    data:
+      message: "{{ mensagem }}"
+      data:
+        type: "{{ modo }}" # Usa announce ou tts conforme selecionado
 
+  # 3. Delay calculado dinamicamente baseado no tamanho do texto
   - delay:
-      seconds: 8
+      seconds: "{{ tempo_espera }}"
 
+  # 4. Retornar ao volume padrão
   - action: alexa_devices.send_text_command
     data:
       device_id: "{{ alexa_device_id }}"
-      text_command: "volume 3"
+      text_command: "volume {{ volume_retorno | int }}"
